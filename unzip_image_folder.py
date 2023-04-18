@@ -2,7 +2,7 @@ import zipfile
 import os
 
 zip_path = 'data.zip'
-extract_path = 'data2'
+extract_path = 'data'
 if os.path.isdir(extract_path):
     print('Data Folder Already exists.')
 else:
