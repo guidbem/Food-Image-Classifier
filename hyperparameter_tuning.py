@@ -27,7 +27,7 @@ def objective(trial):
               'optimizer': trial.suggest_categorical("optimizer", ["Adam"]),
               'num_epochs': trial.suggest_int("num_epochs", 5, 18, step=3),
               'L2': trial.suggest_categorical('L2', [1e-2, 1e-1, 0]),
-              'batch_size': trial.suggest_int("batch_size", 50, 200, step=50)
+              'batch_size': trial.suggest_int("batch_size", 50, 150, step=50)
               }
     
     _, _, cv_val_auc = cross_val_loop(train_val_df, test_df, params)
@@ -37,11 +37,10 @@ def objective(trial):
 study = optuna.create_study(direction="maximize", sampler=optuna.samplers.TPESampler())
 study.optimize(objective, n_trials=50)
 
-best_trial = study.best_trial
-
-for key, value in best_trial.params.items():
-    print("{}: {}".format(key, value))
+print(study.best_trial)
 
 df_trials = study.trials_dataframe().sort_values(by=['value'], ascending=True)
 
 df_trials.to_csv('hyperparameter_opt.csv', index=False)
+
+best_model, final_val_loss, final_val_auc = cross_val_loop(train_val_df, test_df, study.best_params)
