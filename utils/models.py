@@ -44,7 +44,7 @@ class ImageClassifier(object):
 
         self.num_classes = self.datasets['train'].num_classes()
 
-        self.model = models.resnet50(pretrained=True)
+        self.model = models.resnet50(weights=models.ResNet50_Weights.IMAGENET1K_V1)
 
         self.train_strat = train_strat
         # Freeze model parameters in case of 'feature_extraction' strategy
@@ -59,10 +59,10 @@ class ImageClassifier(object):
         
         # Since last layer is linear, it is possible to use the cross entropy loss directly.
         # If one wants to use NLLLoss, a logsoftmax activation haS to be used in the last layer.
-        self.criterion = nn.CrossEntropyLoss()
-        self.optimizer = getattr(optim, self.params['optimizer'])(self.model.parameters(), lr= self.params['lr'])
-        self.auc_eval = BinaryAUROC()
-        self.acc_eval = BinaryAccuracy()
+        self.criterion = nn.CrossEntropyLoss().to(device)
+        self.optimizer = getattr(optim, self.params['optimizer'])(self.model.parameters(), lr= self.params['lr'], weight_decay=self.params['L2'])
+        self.auc_eval = BinaryAUROC().to(device)
+        self.acc_eval = BinaryAccuracy().to(device)
     
         # Decay LR by a factor of 0.1 every 7 epochs
         #self.scheduler = optim.lr_scheduler.StepLR(self.optimizer, step_size=7, gamma=0.1)
@@ -73,7 +73,7 @@ class ImageClassifier(object):
     def load(self, path):
         self.model.load_state_dict(torch.load(path))
         
-    def train(self, batch_size, num_epochs=25, patience=5, model_save_path='best_train_model.pth'):
+    def train(self, batch_size, num_epochs=25, model_save_path='best_train_model.pth'):
         since = time.time()
         
         # Batch size
@@ -194,7 +194,7 @@ class ImageClassifier(object):
                 last_improvement = epoch
                 self.save(model_save_path)
 
-            elif epoch - last_improvement > patience:
+            elif epoch - last_improvement > round(0.2*self.num_epochs,0):
                 print(f'Validation loss has not improved for {round(0.2*self.num_epochs,0)} epochs, stopping training.\n')
                 break
 
@@ -285,6 +285,16 @@ def cross_val_loop(train_val_df, test_df, tuning_params, scoring='auc', k=5, mod
         best model between the cross entropy loss and the AUC.
 
         The parameter k is the number of folds to be implemented.
+
+        The tuning_params argument requires a dictionary with the 
+        keys as parameters and values as the respective parameter
+        value to be used. The following tuning parameters are 
+        required:
+            - optimizer (name from torch.optim)
+            - lr        (learning rate for the optimizer)
+            - L2        (weight decay, L2 penalizer)
+            - batch_size
+            - num_epochs
     """
     kf = KFold(n_splits=k)
 
@@ -292,6 +302,10 @@ def cross_val_loop(train_val_df, test_df, tuning_params, scoring='auc', k=5, mod
     cv_val_auc_values = []
     
     best_score = None
+
+    print('Running Trial with:')
+    for key, value in tuning_params.items():
+        print(f"{key}: {value}")
 
     for fold, (train_index, val_index) in enumerate(kf.split(train_val_df)):
         print("\n\nStarting fold {}/{}\n".format(fold+1, k))
@@ -305,11 +319,12 @@ def cross_val_loop(train_val_df, test_df, tuning_params, scoring='auc', k=5, mod
             test_df=test_df,
             params={
                 'optimizer':tuning_params['optimizer'],
-                'lr':tuning_params['lr']
+                'lr':tuning_params['lr'],
+                'L2':tuning_params['L2']
             }
         )
 
-        model.train(batch_size=32)
+        model.train(num_epochs=tuning_params['num_epochs'], batch_size=tuning_params['batch_size'])
 
         cv_val_loss_values.append(model.best_loss)
         cv_val_auc_values.append(model.best_model_auc)
@@ -340,5 +355,5 @@ def cross_val_loop(train_val_df, test_df, tuning_params, scoring='auc', k=5, mod
     print("Mean CV Loss: {mean_cv_val_loss}")
     print("Mean CV AUC: {mean_cv_auc_loss}")
 
-    return best_model, cv_val_loss_values, cv_val_auc_values
+    return best_model, mean_cv_val_loss, mean_cv_val_auc
 
