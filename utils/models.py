@@ -6,7 +6,7 @@ import time
 import os
 from torch.utils.data import DataLoader
 from torchvision import models
-from torchmetrics.classification import BinaryAUROC, BinaryAccuracy
+from torchmetrics.classification import BinaryAUROC, BinaryAccuracy, BinaryF1Score
 from sklearn.model_selection import train_test_split
 from sklearn.model_selection import KFold
 from .datahandlers import ImageDataset
@@ -186,6 +186,8 @@ class ImageClassifier(object):
 
             if epoch == 0:
                 self.best_loss = self.val_loss_values[-1]
+                self.best_model_auc = self.val_auc_values[-1]
+                self.best_model_acc = self.val_acc_values[-1]
 
             if round(self.val_loss_values[-1], 4) < round(self.best_loss, 4):
                 self.best_loss = self.val_loss_values[-1]
@@ -217,7 +219,7 @@ class ImageClassifier(object):
         self.test_data_size = len(self.datasets['test'])
 
         # Use DataLoader with batch size equal to the full dataset for a single full size test batch 
-        self.test_loader = DataLoader(self.datasets['test'], batch_size=self.test_data_size, shuffle=True)
+        self.test_loader = DataLoader(self.datasets['test'], batch_size=self.test_data_size)
 
         # Test - No gradient tracking needed
         with torch.no_grad():
@@ -235,13 +237,33 @@ class ImageClassifier(object):
                 # Compute the test loss
                 self.test_loss = loss.item()
                 # Applies Softmax to obtain the probabilities
-                probs = nn.Softmax(dim=1)(self.test_outputs)[:,1]
+                self.test_probs = nn.Softmax(dim=1)(self.test_outputs)[:,1]
                 # Compute the AUC
-                self.test_auc = self.auc_eval(probs, labels).item()
-                # Compute the accuracy
-                self.test_acc = self.acc_eval(probs, labels).item()
+                self.test_auc = self.auc_eval(self.test_probs, labels).item()
 
-                print("Test: Loss: {:.4f}, Test Accuracy: {:.4f}".format(self.test_loss, self.test_acc))
+                # Find the best threshold for predictions based on F1 score:
+                threshold_range = np.arange(0.05, 1.0, 0.05)
+
+                best_threshold = None
+                best_f1 = 0.0
+
+                for threshold in threshold_range:
+                    scorer = BinaryF1Score(threshold=threshold)
+                    f1 = scorer(preds=self.test_probs, target=labels)
+                    if f1 > best_f1:
+                        best_f1 = f1
+                        best_threshold = threshold
+
+                # Compute the accuracy
+                test_acc_eval = BinaryAccuracy(threshold=best_threshold)
+                self.test_acc = test_acc_eval(preds=self.test_probs, target=labels).item()
+
+                self.best_threshold = best_threshold
+
+                # Compute predictions
+                self.test_preds = np.array([1 if i >= best_threshold else 0 for i in self.test_probs])
+
+                print("Test: Loss: {:.4f}, Test Accuracy: {:.4f}, Test AUC: {:.4f}".format(self.test_loss, self.test_acc, self.test_auc))
 
     def show_test_pred(self, test_image_path=None):
         # Reads a user specified image path for the model to predict
@@ -352,8 +374,8 @@ def cross_val_loop(train_val_df, test_df, tuning_params, scoring='auc', k=5, mod
     mean_cv_val_auc = np.array(cv_val_auc_values).mean()
 
     print("Finished {k}-fold CV")
-    print("Mean CV Loss: {mean_cv_val_loss}")
-    print("Mean CV AUC: {mean_cv_auc_loss}")
+    print(f"Mean CV Loss: {mean_cv_val_loss}")
+    print(f"Mean CV AUC: {mean_cv_val_auc}")
 
     return best_model, mean_cv_val_loss, mean_cv_val_auc
 

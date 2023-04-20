@@ -23,7 +23,7 @@ else:
 def objective(trial):
 
     params = {
-              'lr': trial.suggest_categorical('lr', [1e-4, 1e-3, 1e-2]),
+              'lr': trial.suggest_categorical('lr', [1e-3, 1e-2]),
               'optimizer': trial.suggest_categorical("optimizer", ["Adam"]),
               'num_epochs': trial.suggest_int("num_epochs", 5, 18, step=3),
               'L2': trial.suggest_categorical('L2', [1e-2, 1e-1, 0]),
@@ -34,6 +34,8 @@ def objective(trial):
 
     return cv_val_auc
 
+
+# This takes a lot of time to run, so do not try unless you have a GPU available
 study = optuna.create_study(direction="maximize", sampler=optuna.samplers.TPESampler())
 study.optimize(objective, n_trials=50)
 
