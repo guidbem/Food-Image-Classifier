@@ -61,7 +61,11 @@ class ImageClassifier(object):
         # If one wants to use NLLLoss, a logsoftmax activation haS to be used in the last layer.
         self.criterion = nn.CrossEntropyLoss().to(device)
         self.optimizer = getattr(optim, self.params['optimizer'])(self.model.parameters(), lr= self.params['lr'], weight_decay=self.params['L2'])
+        
+        # Initialize the AUC metric
         self.auc_eval = BinaryAUROC().to(device)
+
+        # Initialize the Accuracy metric with 0.5 threshold
         self.acc_eval = BinaryAccuracy().to(device)
     
         # Decay LR by a factor of 0.1 every 7 epochs
@@ -208,6 +212,7 @@ class ImageClassifier(object):
             print('Loading lowest validation loss model.')
             self.load(model_save_path)
 
+
     def test(self, load_from_path=False, model_path=None):
         # Checks if user wants to load a model from a file to test
         if load_from_path and model_path is not None:
@@ -241,29 +246,7 @@ class ImageClassifier(object):
                 # Compute the AUC
                 self.test_auc = self.auc_eval(self.test_probs, labels).item()
 
-                # Find the best threshold for predictions based on F1 score:
-                threshold_range = np.arange(0.05, 1.0, 0.05)
-
-                best_threshold = None
-                best_f1 = 0.0
-
-                for threshold in threshold_range:
-                    scorer = BinaryF1Score(threshold=threshold)
-                    f1 = scorer(preds=self.test_probs, target=labels)
-                    if f1 > best_f1:
-                        best_f1 = f1
-                        best_threshold = threshold
-
-                # Compute the accuracy
-                test_acc_eval = BinaryAccuracy(threshold=best_threshold)
-                self.test_acc = test_acc_eval(preds=self.test_probs, target=labels).item()
-
-                self.best_threshold = best_threshold
-
-                # Compute predictions
-                self.test_preds = np.array([1 if i >= best_threshold else 0 for i in self.test_probs])
-
-                print("Test: Loss: {:.4f}, Test Accuracy: {:.4f}, Test AUC: {:.4f}".format(self.test_loss, self.test_acc, self.test_auc))
+                print("Test: Loss: {:.4f}, Test AUC: {:.4f}".format(self.test_loss, self.test_auc))
 
     def show_test_pred(self, test_image_path=None):
         # Reads a user specified image path for the model to predict
@@ -276,6 +259,7 @@ class ImageClassifier(object):
             rnd_idx = np.random.randint(0, self.datasets['test'].__len__()+1)
             test_img = Image.open(self.datasets['test'].image_paths[rnd_idx]).convert('RGB')
             test_img_tensor = self.datasets['test'].data_transforms['test'](test_img).unsqueeze(0).to(device)
+            test_img_label = self.datasets['test'].label_values[rnd_idx]
 
         with torch.no_grad():
             self.model.eval()
@@ -288,6 +272,9 @@ class ImageClassifier(object):
         for i, lab in enumerate(self.datasets['test'].classes):
             line = f"{lab}: {round(probs[0][i].item(), 3)}"
             results.append(line)
+
+        if test_image_path is None:
+            results.append(f"\nTrue Label: {self.datasets['test'].classes[test_img_label]}")
 
         title = '\n'.join(results)
 
